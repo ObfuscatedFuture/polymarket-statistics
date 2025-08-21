@@ -9,6 +9,7 @@ import GlowBackdrop from "../components/GlowBackdrop";
 import NoiseOverlay from "../components/NoiseOverlay";
 import Pin from "../components/Pin";
 import { useAuthModal } from "../app/stores/useAuthModal";
+import Link from "next/link";
 
 export default function Home() {
   const { openSignup } = useAuthModal();
@@ -52,7 +53,12 @@ export default function Home() {
 
           <div className="mt-10 flex flex-wrap gap-3">
             <GlowButton onClick={openSignup} hue={themeHue} className="px-5 py-3">Get started</GlowButton>
-            <GhostButton className="px-5 py-3">View demo</GhostButton>
+
+
+            <Link href="/dashboard_demo">
+              <GhostButton className="px-5 py-3">View demo</GhostButton>
+            </Link>
+
           </div>
 
           {/* Decorative mock chart */}
