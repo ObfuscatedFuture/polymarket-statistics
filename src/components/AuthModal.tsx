@@ -2,7 +2,8 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { supabase } from "../lib/supabaseClient";
+import { useRouter, useSearchParams } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
 import type { Provider } from "@supabase/supabase-js";
 import { X } from "lucide-react";
 
@@ -23,6 +24,10 @@ export default function AuthModal({
   onClose: () => void;
   initialMode?: Mode;
 }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const next = searchParams.get("redirect") || "/dashboard";
+
   const [mode, setMode] = useState<Mode>(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -31,6 +36,10 @@ export default function AuthModal({
   const [message, setMessage] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
 
+  const origin =
+    typeof window !== "undefined" ? window.location.origin : undefined;
+
+  // reset state when modal opens or mode changes from outside
   useEffect(() => {
     setMode(initialMode);
     setEmail("");
@@ -39,11 +48,10 @@ export default function AuthModal({
     setMessage(null);
   }, [initialMode, open]);
 
+  // esc to close
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose]);
@@ -53,103 +61,123 @@ export default function AuthModal({
     setMessage(null);
   };
 
-  const handleOAuth = async (provider: Provider) => {
-    resetMsgs();
+  const withBusy = async (fn: () => Promise<void>) => {
+    if (busy) return;
     setBusy(true);
     try {
+      await fn();
+    } catch (e: any) {
+      setError(e?.message || "Something went wrong.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // ----- Handlers -----
+
+  const handleOAuth = async (provider: Provider) =>
+    withBusy(async () => {
+      resetMsgs();
+      const redirectTo =
+        origin && `${origin}/auth/callback?next=${encodeURIComponent(next)}`;
       const { error } = await supabase.auth.signInWithOAuth({
         provider,
-        options: {
-          redirectTo:
-            typeof window !== "undefined"
-              ? `${window.location.origin}/auth/callback`
-              : undefined,
-        },
+        options: { redirectTo: redirectTo || undefined },
       });
       if (error) throw error;
-      // Redirect happens automatically.
-    } catch (e: any) {
-      setError(e.message ?? "OAuth sign-in failed.");
-    } finally {
-      setBusy(false);
-    }
-  };
+      // Redirect handled by provider -> /auth/callback sets session -> redirects to `next`
+    });
 
-  const handleLogin = async () => {
-    resetMsgs();
-    if (!email || !password) {
-      setError("Please enter your email and password.");
-      return;
-    }
-    setBusy(true);
-    try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) throw error;
-      setMessage("Logged in! Redirecting…");
-      onClose(); // close modal; remove if you prefer to keep it until redirect
-    } catch (e: any) {
-      setError(e.message ?? "Login failed.");
-    } finally {
-      setBusy(false);
-    }
-  };
+  const handleLogin = async () =>
+    withBusy(async () => {
+      resetMsgs();
+      if (!email || !password) {
+        setError("Please enter your email and password.");
+        return;
+      }
 
-  const handleSignup = async () => {
-    resetMsgs();
-    if (!email || !password) {
-      setError("Please enter your email and password.");
-      return;
-    }
-    setBusy(true);
-    try {
-      const { error } = await supabase.auth.signUp({
+      const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
-        options: {
-          emailRedirectTo:
-            typeof window !== "undefined"
-              ? `${window.location.origin}/auth/callback`
-              : undefined,
-        },
       });
       if (error) throw error;
-      setMessage("Account created. Check your email for a confirmation link.");
-      setMode("login");
-    } catch (e: any) {
-      setError(e.message ?? "Signup failed.");
-    } finally {
-      setBusy(false);
-    }
-  };
 
-  const handleMagicLink = async () => {
-    resetMsgs();
-    if (!email) {
-      setError("Enter an email to receive a magic link.");
-      return;
-    }
-    setBusy(true);
-    try {
+      // OPTIONAL: sync server cookies for RSC-protected pages
+      // Implement POST /auth/set (reads tokens & sets cookies via @supabase/ssr)
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (session) {
+          await fetch("/auth/set", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              access_token: session.access_token,
+              refresh_token: session.refresh_token,
+            }),
+          });
+        }
+      } catch {
+        // non-fatal; we'll still navigate client-side
+      }
+
+      setMessage("Logged in! Redirecting…");
+      onClose?.();
+      router.push(next);
+      router.refresh();
+    });
+
+  const handleSignup = async () =>
+    withBusy(async () => {
+      resetMsgs();
+      if (!email || !password) {
+        setError("Please enter your email and password.");
+        return;
+      }
+      const emailRedirectTo =
+        origin && `${origin}/auth/callback?next=${encodeURIComponent(next)}`;
+
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { emailRedirectTo: emailRedirectTo || undefined },
+      });
+      if (error) throw error;
+
+      if (data.session) {
+        // Email confirmations OFF → already signed in
+        onClose?.();
+        router.push(next);
+        router.refresh();
+      } else {
+        // Email confirmations ON → wait for link
+        setMessage("Account created. Check your email to confirm.");
+        setMode("login");
+      }
+    });
+
+  const handleMagicLink = async () =>
+    withBusy(async () => {
+      resetMsgs();
+      if (!email) {
+        setError("Enter an email to receive a magic link.");
+        return;
+      }
+      const emailRedirectTo =
+        origin && `${origin}/auth/callback?next=${encodeURIComponent(next)}`;
+
       const { error } = await supabase.auth.signInWithOtp({
         email,
-        options: {
-          emailRedirectTo:
-            typeof window !== "undefined"
-              ? `${window.location.origin}/auth/callback`
-              : undefined,
-        },
+        options: { emailRedirectTo: emailRedirectTo || undefined },
       });
       if (error) throw error;
       setMessage("Magic link sent! Check your email.");
-    } catch (e: any) {
-      setError(e.message ?? "Could not send magic link.");
-    } finally {
-      setBusy(false);
-    }
-  };
+    });
 
   if (!open) return null;
 
+  // ----- UI -----
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm"
@@ -238,6 +266,7 @@ export default function AuthModal({
               required
             />
           </div>
+
           <div className="space-y-1.5">
             <label className="text-xs text-white/60">Password</label>
             <input

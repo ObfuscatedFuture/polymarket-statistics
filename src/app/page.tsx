@@ -10,11 +10,6 @@ import NoiseOverlay from "../components/NoiseOverlay";
 import Pin from "../components/Pin";
 import { useAuthModal } from "../app/stores/useAuthModal";
 
-
-// Single-file, drop-in landing page showcasing neon dark theme.
-// Assumes TailwindCSS is configured. Uses framer-motion & lucide-react for flair.
-// No auth wiring yet—Login/Sign up are stub buttons.
-
 export default function Home() {
   const { openSignup } = useAuthModal();
   const [themeHue] = useState(210); // tweak this for accent hue
