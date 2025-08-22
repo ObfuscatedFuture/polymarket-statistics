@@ -1,23 +1,16 @@
 // app/dashboard/page.tsx
-// Client-first implementation to keep everything in one file for you to drop in and iterate.
-// If you prefer server-side data loading, split the client bits into a separate component
-// and keep this page as a Server Component that passes props.
-
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis, ResponsiveContainer, ReferenceLine, Brush, Legend, BarChart, Bar } from "recharts";
+import {
+  Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis, ResponsiveContainer,
+  ReferenceLine, Brush, Legend, BarChart, Bar
+} from "recharts";
 import { format, parseISO } from "date-fns";
-import { motion } from "framer-motion";
-import { TrendingUp, TrendingDown, Activity, Layers, DollarSign, Percent, Gauge, Trophy, ArrowRight } from "lucide-react";
-import { supabase } from "@/lib/supabaseClient"; // browser client; used for fetching per-user data after auth
+import { TrendingUp, TrendingDown, Activity, Layers, DollarSign, Percent, Gauge, Trophy, ArrowRight, Search, RotateCcw } from "lucide-react";
+import { supabase } from "@/lib/supabaseClient"; // (optional) wire to your schema later
 
-// --- Optional shadcn/ui imports; if missing, replace with the lightweight fallback components below ---
-// import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-// import { Button } from "@/components/ui/button";
-// import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-
-// Fallback shadcn-like components (minimal styling) so this file is self-contained
+// --- Lightweight shadcn-like stubs (keep file self-contained) ---
 const Card = ({ className = "", children }: any) => (
   <div className={`rounded-2xl border border-white/10 bg-[#0f1115] shadow-xl ${className}`}>{children}</div>
 );
@@ -40,28 +33,15 @@ const Button = ({ children, className = "", ...props }: any) => (
 );
 
 // ---------- Types ----------
-
 type DailyPnl = {
-  date: string; // ISO date
-  realized: number; // realized pnl for the day
-  unrealized: number; // mark-to-market change for the day
-  fees: number; // fees paid that day (positive number)
+  date: string; realized: number; unrealized: number; fees: number;
 };
-
 type Trade = {
-  id: string;
-  timestamp: string; // ISO datetime
-  market: string;
-  side: "BUY" | "SELL";
-  token: string; // e.g., "YES" | "NO"
-  price: number; // in USDC
-  qty: number; // number of shares/contracts
-  fee: number; // fee paid in USDC
-  realizedPnl?: number; // if trade closes position partially/fully
+  id: string; timestamp: string; market: string; side: "BUY" | "SELL";
+  token: string; price: number; qty: number; fee: number; realizedPnl?: number;
 };
 
 // ---------- Mock data (replace with Supabase fetch) ----------
-
 function generateMockData(): { daily: DailyPnl[]; trades: Trade[]; aggregated: any } {
   const today = new Date();
   const days = 120;
@@ -95,11 +75,7 @@ function generateMockData(): { daily: DailyPnl[]; trades: Trade[]; aggregated: a
       id: String(i + 1),
       timestamp: t.toISOString(),
       market: markets[Math.floor(Math.random() * markets.length)],
-      side,
-      token,
-      price,
-      qty,
-      fee,
+      side, token, price, qty, fee,
       realizedPnl: Math.round(((Math.random() - 0.5) * 20) * 100) / 100,
     };
   });
@@ -109,16 +85,12 @@ function generateMockData(): { daily: DailyPnl[]; trades: Trade[]; aggregated: a
   const totalFees = daily.reduce((s, d) => s + d.fees, 0);
 
   const wins = trades.filter((t) => (t.realizedPnl ?? 0) > 0).length;
-  const losses = trades.length - wins;
 
   const aggregated = {
-    totalRealized,
-    totalUnrealized,
-    totalFees,
+    totalRealized, totalUnrealized, totalFees,
     netPnl: totalRealized + totalUnrealized - totalFees,
     winRate: trades.length ? (wins / trades.length) : 0,
     tradesCount: trades.length,
-    // naive sharpe-ish: mean(daily returns)/std(daily returns) * sqrt(365)
     sharpe: (() => {
       const rets = daily.map((d) => d.realized + d.unrealized - d.fees);
       const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
@@ -132,31 +104,30 @@ function generateMockData(): { daily: DailyPnl[]; trades: Trade[]; aggregated: a
   return { daily, trades, aggregated };
 }
 
-// ---------- Utility ----------
-
+// ---------- Utils ----------
 function fmtMoney(n: number) {
   const sign = n < 0 ? "-" : "";
   const v = Math.abs(n);
   return `${sign}$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
-
 function classNames(...xs: (string | false | null | undefined)[]) {
   return xs.filter(Boolean).join(" ");
 }
 
-// ---------- Dashboard Component ----------
-
+// ---------- Component ----------
 export default function DashboardPage() {
-  // Replace with Supabase fetches. For example:
-  // const user = await supabase.auth.getUser() (server-side preferred)
-  // const { data: daily } = await supabase.from('daily_pnl').select('*').eq('user_id', user.id)
-  // const { data: trades } = await supabase.from('trades').select('*').eq('user_id', user.id).order('timestamp', { ascending: false })
-
+  // Data state (mocked for now)
   const [{ daily, trades, aggregated }, setState] = useState(generateMockData());
 
-  // Controls
+  // View state
   const [mode, setMode] = useState<"cumulative" | "daily">("cumulative");
   const [range, setRange] = useState<"7D" | "30D" | "90D" | "ALL">("30D");
+
+  // "Viewed user" & search UX
+  const [viewedUser, setViewedUser] = useState<string>("polymarket_user");
+  const [searchInput, setSearchInput] = useState<string>("");
+  const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  const [loading, setLoading] = useState<boolean>(false);
 
   // Derived series
   const filtered = useMemo(() => {
@@ -178,7 +149,7 @@ export default function DashboardPage() {
       cum += delta;
       return {
         date: d.date,
-        delta, // daily net
+        delta,
         realized: d.realized,
         unrealized: d.unrealized,
         fees: -d.fees,
@@ -190,29 +161,70 @@ export default function DashboardPage() {
   const netNow = aggregated.netPnl;
   const netColor = netNow >= 0 ? "text-emerald-400" : "text-red-400";
 
-  // Fetch template (client-side). Hook this to your Supabase schema.
-  useEffect(() => {
-    // Example template for later:
-    async function load() {
-      // const { data: dailyRows } = await supabase.from("daily_pnl").select("date, realized, unrealized, fees").order("date");
-      // const { data: tradeRows } = await supabase.from("trades").select("*").order("timestamp", { ascending: false }).limit(50);
+  // Template for loading data (wire this to Supabase + Polymarket later)
+  async function loadForUser(username: string) {
+    setLoading(true);
+    try {
+      // Example (pseudo):
+      // const { data: dailyRows } = await supabase.from("daily_pnl").select("*").eq("pm_user", username).order("date");
+      // const { data: tradeRows } = await supabase.from("trades").select("*").eq("pm_user", username).order("timestamp", { ascending: false }).limit(200);
       // if (dailyRows && tradeRows) setState({ daily: dailyRows, trades: tradeRows, aggregated: computeAggregates(dailyRows, tradeRows) });
+      // else setState(generateMockData());
+
+      // For now, regenerate mock to simulate a fetch:
+      setState(generateMockData());
+      setViewedUser(username);
+      setLastUpdated(new Date());
+    } finally {
+      setLoading(false);
     }
-    load();
+  }
+
+  function onSearchSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!searchInput.trim()) return;
+    loadForUser(searchInput.trim());
+    setSearchInput("");
+  }
+
+  function onRefresh() {
+    loadForUser(viewedUser);
+  }
+
+  useEffect(() => {
+    // Initial load (current viewedUser)
+    // In real use, you might read ?user= from URL or the session user.
+    // loadForUser(viewedUser);
   }, []);
 
   return (
     <div className="min-h-dvh bg-[#0b0d12] text-white">
-      {/* Top bar */}
-      <div className="sticky top-0 z-20 border-b border-white/10 bg-[#0b0d12]/80 backdrop-blur supports-[backdrop-filter]:bg-[#0b0d12]/60">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+      {/* NAVBAR with Search */}
+      <div className="sticky top-0 z-30 border-b border-white/10 bg-[#0b0d12]/80 backdrop-blur supports-[backdrop-filter]:bg-[#0b0d12]/60">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
             <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-[#6e5efb] to-[#2bc2ff] shadow-[0_0_24px_rgba(107,99,255,0.6)]" />
-            <div>
+            <div className="truncate">
               <div className="text-sm text-white/60">Polymarket</div>
-              <div className="text-[15px] font-semibold">Trader Dashboard</div>
+              <div className="text-[15px] font-semibold truncate">Trader Dashboard</div>
             </div>
           </div>
+
+          {/* Searchbar */}
+          <form onSubmit={onSearchSubmit} className="hidden md:flex items-center gap-2 flex-1 max-w-xl">
+            <div className="flex items-center gap-2 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 focus-within:ring-2 focus-within:ring-[#6e5efb]/50">
+              <Search className="h-4 w-4 text-white/50" />
+              <input
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Search Polymarket username…"
+                className="bg-transparent text-sm outline-none w-full placeholder:text-white/40"
+              />
+            </div>
+            <Button type="submit">Search</Button>
+          </form>
+
+          {/* Range toggles */}
           <div className="flex items-center gap-2">
             <Button onClick={() => setRange("7D")} className={classNames(range === "7D" && "bg-white/15")}>7D</Button>
             <Button onClick={() => setRange("30D")} className={classNames(range === "30D" && "bg-white/15")}>30D</Button>
@@ -220,10 +232,59 @@ export default function DashboardPage() {
             <Button onClick={() => setRange("ALL")} className={classNames(range === "ALL" && "bg-white/15")}>All</Button>
           </div>
         </div>
+
+        {/* Mobile search (below main row) */}
+        <div className="md:hidden mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-3">
+          <form onSubmit={onSearchSubmit} className="flex items-center gap-2">
+            <div className="flex items-center gap-2 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 focus-within:ring-2 focus-within:ring-[#6e5efb]/50">
+              <Search className="h-4 w-4 text-white/50" />
+              <input
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Search Polymarket username…"
+                className="bg-transparent text-sm outline-none w-full placeholder:text-white/40"
+              />
+            </div>
+            <Button type="submit">Search</Button>
+          </form>
+        </div>
       </div>
 
       <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        {/* Summary header */}
+        {/* PROFILE STRIP (above graphs/stats) */}
+        <Card className="border-white/20">
+          <CardContent className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            {/* Left: Avatar + Name */}
+            <div className="flex items-center gap-4">
+              {/* Placeholder avatar */}
+              <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-white/15 to-white/5 border border-white/10 flex items-center justify-center">
+                <div className="h-10 w-10 rounded-xl bg-white/10 flex items-center justify-center text-white/70 text-lg font-bold">
+                  {viewedUser.slice(0, 1).toUpperCase()}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs uppercase tracking-wider text-white/50">Viewing</div>
+                <div className="text-xl font-semibold leading-tight">{viewedUser}</div>
+                <div className="text-xs text-white/50 mt-0.5">
+                  Last updated{" "}
+                  <span className="text-white/70">
+                    {format(lastUpdated, "MMM d, yyyy • HH:mm")}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Right: Actions */}
+            <div className="flex items-center gap-2">
+              <Button onClick={onRefresh} className="flex items-center gap-2" disabled={loading}>
+                <RotateCcw className={classNames("h-4 w-4", loading && "animate-spin")} />
+                Refresh
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* --- SUMMARY CARDS --- */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <Card>
             <CardHeader>
@@ -233,7 +294,9 @@ export default function DashboardPage() {
               <div className="flex items-end justify-between">
                 <div>
                   <div className={`text-3xl md:text-4xl font-bold ${netColor}`}>{fmtMoney(netNow)}</div>
-                  <div className="text-white/50 text-sm mt-1">Realized {fmtMoney(aggregated.totalRealized)} · Unrealized {fmtMoney(aggregated.totalUnrealized)} · Fees {fmtMoney(-aggregated.totalFees)}</div>
+                  <div className="text-white/50 text-sm mt-1">
+                    Realized {fmtMoney(aggregated.totalRealized)} · Unrealized {fmtMoney(aggregated.totalUnrealized)} · Fees {fmtMoney(-aggregated.totalFees)}
+                  </div>
                 </div>
                 <div className="opacity-90">
                   {netNow >= 0 ? <TrendingUp className="h-8 w-8 text-emerald-400" /> : <TrendingDown className="h-8 w-8 text-red-400" />}
@@ -288,13 +351,13 @@ export default function DashboardPage() {
                     <div className="text-white/90 font-medium">{aggregated.worstMarket}</div>
                   </div>
                 </div>
-                <div className="text-white/50 text-xs">* Markets estimated from recent trades in this mock. Replace with real aggregation.</div>
+                <div className="text-white/50 text-xs">* Replace with real aggregation.</div>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* PnL Chart */}
+        {/* --- PNL CHART --- */}
         <Card className="overflow-hidden">
           <CardHeader className="flex items-center justify-between">
             <CardTitle>Equity Curve</CardTitle>
@@ -341,7 +404,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Recent Trades */}
+        {/* --- RECENT TRADES --- */}
         <Card>
           <CardHeader className="flex items-center justify-between">
             <CardTitle>Recent Trades</CardTitle>
@@ -381,7 +444,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Secondary analytics */}
+        {/* --- SECONDARY ANALYTICS --- */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Card>
             <CardHeader>
@@ -430,14 +493,14 @@ export default function DashboardPage() {
         </div>
 
         <div className="text-center text-white/40 text-xs">
-          Tip: connect to your Supabase schema by replacing the mock generator with real queries. I can wire it if you share your table layout (trades/fills, marks, daily_pnl, positions).
+          Tip: wire the search to a Polymarket user lookup (e.g., REST or subgraph) and hydrate from Supabase caches. The Refresh button should re-pull and upsert before rendering.
         </div>
       </main>
     </div>
   );
 }
 
-// Helper if you want to compute aggregates after fetching real rows
+// Helper for real data
 export function computeAggregates(daily: DailyPnl[], trades: Trade[]) {
   const totalRealized = daily.reduce((s, d) => s + d.realized, 0);
   const totalUnrealized = daily.reduce((s, d) => s + d.unrealized, 0);

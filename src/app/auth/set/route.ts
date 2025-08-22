@@ -11,7 +11,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Missing tokens" }, { status: 400 });
   }
 
-  // @ts-expect-error - awaitable in dev guard
   const cookieStore = await cookies();
 
   const supabase = createServerClient(
